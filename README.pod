@@ -16,8 +16,8 @@ Load modules and install modules to the development style lib/original-path
     use CompUnit::Repository::Lib;
 
     # Archive must contain a META6.json file
-    my $archive = $?FILE.IO.parent.child('test-libs/some-path');
-    use lib "CompUnit::Repository::Lib#{~$archive}";
+    my $distribution-path = $?FILE.IO.parent.child('test-libs/some-path');
+    use lib "CompUnit::Repository::Lib#{$distribution-path}";
 
     require <lib/Zef.pm6>  # `require` by relative path
     require <Zef::Client>; # `require` by name
