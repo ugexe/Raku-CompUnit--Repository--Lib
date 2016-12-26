@@ -84,13 +84,13 @@ class CompUnit::Repository::Lib {
     }
 
     multi method candidates(CompUnit::DependencySpecification $spec) {
-        nextwith(name => $spec.short-name, auth => $spec.auth-matcher, ver  => $spec.version-matcher);
+        self.candidates(name => $spec.short-name, auth => $spec.auth-matcher, ver  => $spec.version-matcher);
     }
     multi method candidates(:$name!, :$auth = '', :version(:$ver) = 0) {
         gather for self.installed -> $dist {
             next unless any($name eq $dist.meta<name>, |($dist.meta<provides><<$name>>:exists));
             next if ?$auth and $dist.meta<auth> !~~ $auth;
-            next if ?$ver  and $dist.meta<ver version>.first(*.defined) !~~ $ver;
+            next if ?$ver  and Version.new($dist.meta<ver version>.first(*.defined)) !~~ Version.new($ver);
             take $dist;
         }
     }
@@ -107,24 +107,24 @@ class CompUnit::Repository::Lib {
             return %!loaded{~$spec} if %!loaded{~$spec}:exists;
 
             # XXX: $spec.short-name check is not good and should be removed
-            my $load-path := $dist<source>
-                ?? $dist.prefix.child($dist<source>)
+            my $load-path := $dist.meta<source>
+                ?? $dist.prefix.child($dist.meta<source>)
                 !! first *.e,
-                    $dist.prefix.child($dist<provides>{~$spec}),
-                    $dist.prefix.child($dist<provides>{$spec.short-name});
-            my $loader = IO::Path.new(path => $load-path, :CWD($dist.prefix));
+                    $dist.prefix.child($dist.meta<provides>{~$spec}),
+                    $dist.prefix.child($dist.meta<provides>{$spec.short-name});
+
+            my $loader = IO::Path.new($load-path, :CWD($dist.prefix));
             my $*RESOURCES  = Distribution::Resources.new(:repo(self), :$dist-id);
             my $id          = $loader.basename;
-            my $repo-prefix = self.prefix;
-            my $handle      = $precomp.try-load(
-                CompUnit::PrecompilationDependency::File.new(
-                    :id(CompUnit::PrecompilationId.new($id)),
-                    :src($repo-prefix ?? $repo-prefix ~ $loader.relative($.prefix) !! $loader.abspath),
-                    :$spec,
-                ),
-                :source($loader),
-                :@precomp-stores,
-            );
+            my $handle;#      = $precomp.try-load(
+                #CompUnit::PrecompilationDependency::File.new(
+                #    :id(CompUnit::PrecompilationId.new($id)),
+                #    :src($loader.absolute),
+                #    :$spec,
+                #),
+                #:source($loader),
+                #:@precomp-stores,
+            #);
             my $precompiled = defined $handle;
             $handle //= CompUnit::Loader.load-source-file($loader);
 
@@ -132,8 +132,8 @@ class CompUnit::Repository::Lib {
             my $compunit = CompUnit.new(
                 :$handle,
                 :short-name($spec.short-name),
-                :version($dist<ver>),
-                :auth($dist<auth> // Str),
+                :version($dist.meta<ver> // Version.new(0)),
+                :auth($dist.meta<auth> // Str),
                 :repo(self),
                 :repo-id($id),
                 :$precompiled,
@@ -156,10 +156,10 @@ class CompUnit::Repository::Lib {
             return CompUnit.new(
                 :handle(CompUnit::Handle),
                 :short-name($spec.short-name),
-                :version($dist<ver>),
-                :auth($dist<auth> // Str),
+                :version($dist.meta<ver> // Version.new(0)),
+                :auth($dist.meta<auth> // Str),
                 :repo(self),
-                :repo-id($dist<source> // self!read-dist($dist-id)<provides>{$spec.short-name}.values[0]<file>),
+                :repo-id($dist.meta<source> // self!read-dist($dist-id)<provides>{$spec.short-name}),
                 :distribution($dist),
             );
         }
@@ -172,10 +172,15 @@ class CompUnit::Repository::Lib {
         self.prefix.child($dist-id).child($key);
     }
 
-    method files($name-path, :$name, :$auth, :$ver) {
-        gather for self.installed -> $dist {
+    method files($name-path, *%spec [:$name, :$auth, :$ver]) {
+        my $distributions := $name
+            ?? self.candidates(|%spec)
+            !! self.installed
+                .grep({!$auth || .meta<auth> ~~ $auth})
+                .grep({!$ver  || Version.new(.meta<ver version>.first(*.defined)) ~~ Version.new($ver)});
+        gather for $distributions -> $dist {
             my @dist-name-paths = $dist.meta<files>.map(*.&parse-value);
-            next if $name-path ~~ none(@dist-name-paths) || !self.candidates(:$name, :$auth, :$ver);
+            next if $name-path ~~ none(@dist-name-paths);
             take $dist.meta;
         }
     }
@@ -189,7 +194,7 @@ class CompUnit::Repository::Lib {
         }
     }
 
-    method install(Distribution $distribution, Bool :$force) {
+    method install(Distribution $distribution, Bool :$force, Bool :$precompile = True) {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
         fail "$dist already installed" if not $force and $dist.id ~~ self.installed.any;
 
@@ -229,6 +234,7 @@ class CompUnit::Repository::Lib {
                 when /^bin\// {
                     my $withoutext  = $name-path.subst(/\.[exe|bat]$/, '');
                     for '', '-j', '-m' -> $be {
+                        mkdir $.prefix.child("$withoutext$be").IO.parent;
                         $.prefix.child("$withoutext$be").IO.spurt:
                             $perl_wrapper.subst('#name#', $name-path.IO.basename, :g).subst('#perl#', "perl6$be").subst('#dist-name#', $dist.meta<name>);
                         if $is-win {
@@ -262,7 +268,7 @@ class CompUnit::Repository::Lib {
         # identity changes with every installation of a dist.
         $!id = Any;
         my $installed-distribution = Distribution::Path.new($dist-dir);
-        self!precompile-distribution($installed-distribution);
+        self!precompile-distribution($installed-distribution) if ?$precompile;
         return $installed-distribution;
     }
 
@@ -275,25 +281,37 @@ class CompUnit::Repository::Lib {
         my $dist-dir    = self.prefix.child($dist.id) andthen *.mkdir;
         my $sources-dir = $dist-dir.child('lib');
 
-        for $dist.meta<provides>.kv -> $name, $origpath {
-            my $id = $dist.meta<files>{$origpath};
-            my $source = $sources-dir.child($id);
-            if $precomp.may-precomp {
-                my $rev-deps-file = ($precomp.store.path($*PERL.compiler.id, $id) ~ '.rev-deps').IO;
-                my @rev-deps      = $rev-deps-file.e ?? $rev-deps-file.lines !! ();
-                #if %done{$name} { note "(Already did $name)" if $verbose; next }
-                #note("Precompiling $name") if $verbose;
+        {
+            my $head = $*REPO;
+            PROCESS::<$REPO> := self; # Precomp files should only depend on downstream repos
+            my $precomp = $*REPO.precomp-repository;
+            my $*RESOURCES = Distribution::Resources.new(:repo(self), dist-id => $dist.id);
+            my %done;
+            my %provides = $dist.meta<provides>;
 
-                for @rev-deps -> $rev-dep-id {
-                    if %done{$rev-dep-id} {
-                        #note "(Already did $rev-dep-id)" if $verbose;
-                        next;
-                    }
-                    #note("Precompiling reverse dependency $rev-dep-id") if $verbose;
-                    my $rev-dep-source = $sources-dir.child($rev-dep-id);
-                    %done{$rev-dep-id} = $precomp.precompile($rev-dep-source, $rev-dep-id, :force) if $source.e;
-                }
+            my $compiler-id = CompUnit::PrecompilationId.new($*PERL.compiler.id);
+            for %provides.kv -> $name, $name-path {
+                my $id = CompUnit::PrecompilationId.new($dist.id);
+                $precomp.store.delete($compiler-id, $id);
             }
+
+            for %provides.kv -> $name, $name-path {
+                my $id = CompUnit::PrecompilationId.new($dist.id);
+                my $source-file = $distribution.prefix.child($name-path);
+
+                if %done{$id} {
+                    #note "(Already did $id)" if $verbose;
+                    next;
+                }
+                #note("Precompiling $id ($name)") if $verbose;
+                $precomp.precompile(
+                    $source-file,
+                    $id,
+                    :source-name("$source-file ($name)"),
+                );
+                %done{$id} = 1;
+            }
+            PROCESS::<$REPO> := $head;
         }
     }
 
