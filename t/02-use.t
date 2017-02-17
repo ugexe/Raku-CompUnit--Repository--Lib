@@ -3,10 +3,8 @@ use Test;
 plan 2;
 
 use CompUnit::Repository::Lib;
-
 use lib "CompUnit::Repository::Lib#{$?FILE.IO.parent.child('test-libs')}";
 
-# XXX: Not sure why the `require` are needed, so these tests are probably bad
 
 subtest {
     {

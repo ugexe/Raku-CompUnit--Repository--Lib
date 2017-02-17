@@ -3,7 +3,6 @@ use Test;
 plan 5;
 
 use CompUnit::Repository::Lib;
-
 use lib "CompUnit::Repository::Lib#{$?FILE.IO.parent.child('test-libs')}";
 
 
