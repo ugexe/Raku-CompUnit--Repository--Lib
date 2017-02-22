@@ -66,6 +66,7 @@ class CompUnit::Repository::Lib {
     has $!precomp-stores;
     has $!precomp-store;
 
+    my $verbose := nqp::getenvhash<RAKUDO_LOG_PRECOMP>;
 
     # I wonder if `candidates` should be the Recommendation Manager suggested in S22,
     # and be separate from CompUnit *loading* functionality.
@@ -139,6 +140,7 @@ class CompUnit::Repository::Lib {
     method name(--> Str) { say CompUnit::RepositoryRegistry.use-repository(self); CompUnit::RepositoryRegistry.name-for-repository(self) }
     method installed { $!prefix.IO.dir.grep(*.d).grep(*.child('META6.json').e).map({ self!read-dist($_.basename) }) }
 
+    method !content-address($distribution, *@parts) { reduce { nqp::sha1(join '/', $^a, $^b) }, "lib#id[{$distribution.id}]#{$!prefix}", @parts }
     method !read-dist($dist-id) { Distribution::Lib.new( $!prefix.child($dist-id) ) }
 
     method need(
@@ -157,7 +159,7 @@ class CompUnit::Repository::Lib {
             my $source-handle  = $distribution.content($name-path);
             my $precomp-handle = $precomp.try-load(
                 CompUnit::PrecompilationDependency::File.new(
-                    :id(CompUnit::PrecompilationId.new($distribution.id)),
+                    :id(CompUnit::PrecompilationId.new(self!content-address($distribution, $name-path))),
                     :src($source-handle.path.?absolute),
                     :$spec,
                 ),
@@ -208,7 +210,7 @@ class CompUnit::Repository::Lib {
             ?? self.candidates(|%spec)
             !! self.installed
                 .grep({!$auth || .meta<auth> ~~ $auth})
-                .grep({!$ver  || Version.new(.meta<ver version>.first(*.defined)) ~~ Version.new($ver)});
+                .grep({!$ver  || .version ~~ Version.new($ver)});
         gather for $distributions -> $dist {
             my @dist-name-paths = $dist.meta<files>.map(*.&parse-value);
             next if $name-path ~~ none(@dist-name-paths);
@@ -256,7 +258,7 @@ class CompUnit::Repository::Lib {
 
                 when /^@provides$/ {
                     my $name = %pm6-path2name{$name-path};
-                    # note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
+                    note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
                     my $content = $handle.open.slurp-rest(:bin,:close);
                     $destination.spurt($content);
                     $handle.close;
@@ -322,19 +324,19 @@ class CompUnit::Repository::Lib {
 
             my $compiler-id = CompUnit::PrecompilationId.new($*PERL.compiler.id);
             for %provides.kv -> $name, $name-path {
-                my $id = CompUnit::PrecompilationId.new($dist.id);
+                my $id = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
                 $precomp.store.delete($compiler-id, $id);
             }
 
             for %provides.kv -> $name, $name-path {
-                my $id = CompUnit::PrecompilationId.new($dist.id);
+                my $id = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
                 my $source-file = $distribution.prefix.child($name-path);
 
                 if %done{$id} {
-                    #note "(Already did $id)" if $verbose;
+                    note "(Already did $id)" if $verbose;
                     next;
                 }
-                #note("Precompiling $id ($name)") if $verbose;
+                note("Precompiling $id ($name)") if $verbose;
                 $precomp.precompile(
                     $source-file,
                     $id,

@@ -16,6 +16,13 @@ subtest {
 }, 'Skip precompiling during installation';
 
 subtest {
+    my $dist = Distribution::Hash.new({ meta => perl => '6.c', version => '*', auth => 'github:ugexe', name => 'ZeffeZ', provides => { Zef => 'lib/Zef.pm6' } }, prefix => $distribution-path);
+    my $install-to-path = $*TMPDIR.child('perl6-cur-lib').child(time).child((^1000000).pick) andthen *.mkdir;
+    my $install-to-repo = CompUnit::Repository::Lib.new(prefix => $install-to-path.absolute);
+    lives-ok { $install-to-repo.install($dist) }
+}, 'Attempt precompiling during installation with no dependencies (internal or external)';
+
+subtest {
     my $install-to-path = $*TMPDIR.child('perl6-cur-lib').child(time).child((^1000000).pick) andthen *.mkdir;
     my $install-to-repo = CompUnit::Repository::Lib.new(prefix => $install-to-path.absolute);
     lives-ok { $install-to-repo.install($distribution) }
