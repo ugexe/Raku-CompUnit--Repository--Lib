@@ -3,7 +3,7 @@ use Test;
 plan 2;
 
 use CompUnit::Repository::Lib;
-use lib "CompUnit::Repository::Lib#{$?FILE.IO.parent.child('test-libs')}";
+use lib "CompUnit::Repository::Lib#name<foo>#{$?FILE.IO.parent.child('test-libs')}";
 
 
 my $distribution-path = $?FILE.IO.parent.child('test-libs').dir.grep({.basename !~~ /^\.precomp/}).sort.head;

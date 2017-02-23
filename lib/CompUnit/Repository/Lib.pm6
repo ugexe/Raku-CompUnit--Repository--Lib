@@ -1,5 +1,7 @@
 use nqp;
 
+my $RMD = $*RAKUDO_MODULE_DEBUG;
+
 my $windows_wrapper = '@rem = \'--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
@@ -55,9 +57,10 @@ class CompUnit::Repository::Lib {
     also does CompUnit::Repository::Installable;
     also does CompUnit::Repository::Locally;
 
+    has $.name;
     has $!id;
-    has %!dist-metas;
 
+    has %!dist-metas;
     has %!resources;
     has %!loaded;
 
@@ -87,60 +90,62 @@ class CompUnit::Repository::Lib {
     #}
 
     my class Distribution::Lib is Distribution::Path {
-        has $!id;
+        has $!content-id;
 
-        method version { Version.new(first *.defined, flat $.meta<ver version>, 0) }
         method Str { "{$.meta<name>}:ver<{$.version // ''}>:auth<{$.meta<auth> // ''}>:api<{$.meta<api> // ''}>" }
+        method version { Version.new(first *.defined, flat $.meta<ver version>, 0) }
 
         # https://github.com/rakudo/rakudo/blob/faea193ec9563f8425a2a59cc4190068adb41c6e/src/core/CompUnit/Repository/FileSystem.pm#L60
         method id {
-            state %id-cache;
-            %id-cache{nqp::sha1(self.Str)} //= do {
-                my $parts := nqp::list_s;
-                my $prefix = self.prefix;
-                my $dir  := { .match(/ ^ <.ident> [ <[ ' - ]> <.ident> ]* $ /) }; # ' hl
-                my $file := -> str $file {
-                    nqp::eqat($file,'.pm',nqp::sub_i(nqp::chars($file),3))
-                    || nqp::eqat($file,'.pm6',nqp::sub_i(nqp::chars($file),4))
-                };
-                nqp::if(
-                  $!id,
-                  $!id,
-                  ($!id = nqp::if(
-                    $prefix.e,
-                    nqp::stmts(
-                      (my $iter := Rakudo::Internals.DIR-RECURSE(
-                        $prefix.absolute,:$dir,:$file).iterator),
-                      nqp::until(
-                        nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-                        nqp::if(
-                          nqp::filereadable($pulled)
-                            && (my $pio := nqp::open($pulled,'r')),
-                          nqp::stmts(
-                            nqp::setencoding($pio,'iso-8859-1'),
-                            nqp::push_s($parts,nqp::sha1(nqp::readallfh($pio))),
-                            nqp::closefh($pio)
-                          )
-                        )
-                      ),
-                      nqp::sha1(nqp::join('',$parts))
-                    ),
-                    nqp::sha1('')
-                  ))
-                )
-            }
+            my $parts := nqp::list_s;
+            my $prefix = self.prefix;
+            my $dir  := { .match(/ ^ <.ident> [ <[ ' - ]> <.ident> ]* $ /) }; # ' hl
+            my $file := -> str $file {
+                nqp::eqat($file,'.pm',nqp::sub_i(nqp::chars($file),3))
+                || nqp::eqat($file,'.pm6',nqp::sub_i(nqp::chars($file),4))
+            };
+            nqp::if(
+              $!content-id,
+              $!content-id,
+              ($!content-id = nqp::if(
+                $prefix.e,
+                nqp::stmts(
+                  (my $iter := Rakudo::Internals.DIR-RECURSE(
+                    $prefix.absolute,:$dir,:$file).iterator),
+                  nqp::until(
+                    nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+                    nqp::if(
+                      nqp::filereadable($pulled)
+                        && (my $pio := nqp::open($pulled,'r')),
+                      nqp::stmts(
+                        nqp::setencoding($pio,'iso-8859-1'),
+                        nqp::push_s($parts,nqp::sha1(nqp::readallfh($pio))),
+                        nqp::closefh($pio)
+                      )
+                    )
+                  ),
+                  nqp::sha1(nqp::join('',$parts))
+                ),
+                nqp::sha1('')
+              ))
+            )
         }
     }
 
-    method short-id  { 'lib'  }
-    method path-spec { 'lib#' }
+    # When new module is installed $!id is set to Any so that this gets re-run
+    method id { $!id //= self.installed.map(*.id).sort.reduce({ nqp::sha1($^a, $^b) }) }
+
+    method short-id { 'lib' }
+    method path-spec { "CompUnit::Repository::Lib#name({$!name // 'wut'})#{self.prefix.abspath}" }
+
+    method repo-id($distribution) { self.path-spec ~ '/' ~ $distribution.id }
+
     method loaded returns Iterable { %!loaded.values }
     method prefix { $!prefix.IO }
     method can-install { self.prefix.w }
-    method name(--> Str) { say CompUnit::RepositoryRegistry.use-repository(self); CompUnit::RepositoryRegistry.name-for-repository(self) }
     method installed { $!prefix.IO.dir.grep(*.d).grep(*.child('META6.json').e).map({ self!read-dist($_.basename) }) }
 
-    method !content-address($distribution, *@parts) { reduce { nqp::sha1(join '/', $^a, $^b) }, "lib#id[{$distribution.id}]#{$!prefix}", @parts }
+    method !content-address($distribution, *@parts) { reduce { nqp::sha1(join '/', $^a, $^b) }, self.path-spec, @parts }
     method !read-dist($dist-id) { Distribution::Lib.new( $!prefix.child($dist-id) ) }
 
     method need(
@@ -150,20 +155,26 @@ class CompUnit::Repository::Lib {
     )
         returns CompUnit:D
     {
+        $RMD("[need] -> {$spec.perl}") if $RMD;
         return %!loaded{~$spec} if %!loaded{~$spec}:exists;
+        $RMD("[need] not cached - keep looking...") if $RMD;
 
         if self.candidates($spec)[0] -> $distribution {
             my $*RESOURCES = Distribution::Resources.new(:repo(self), :dist-id($distribution.id));
 
-            my $name-path      = $distribution.meta<provides>{$spec.short-name};
-            my $source-handle  = $distribution.content($name-path);
+            my $name-path     = $distribution.meta<provides>{$spec.short-name};
+            my $source-path   = $distribution.prefix.child($name-path);
+            my $source-handle = CompUnit::Loader.load-source-file( $source-path );
+
+            $RMD("[need] name-path:{$name-path}=$source-path source-handle:{$source-handle.perl}") if $RMD;
+
             my $precomp-handle = $precomp.try-load(
                 CompUnit::PrecompilationDependency::File.new(
                     :id(CompUnit::PrecompilationId.new(self!content-address($distribution, $name-path))),
-                    :src($source-handle.path.?absolute),
+                    :src($source-path.absolute),
                     :$spec,
                 ),
-                :source($distribution.prefix.child($source-handle.path)),
+                :source($source-path),
                 :@precomp-stores,
             );
             my $compunit = CompUnit.new(
@@ -172,11 +183,12 @@ class CompUnit::Repository::Lib {
                 :version($distribution.version),
                 :auth($distribution.meta<auth> // Str),
                 :repo(self),
-                :repo-id($distribution.id),
+                :repo-id(self.repo-id($distribution)),
                 :precompiled(defined $precomp-handle),
                 :$distribution,
             );
 
+            $RMD("[need] taking compunit {$compunit // 'WTF ???'}") if $RMD;
             return %!loaded{~$spec} //= $compunit;
         }
 
@@ -192,7 +204,7 @@ class CompUnit::Repository::Lib {
                 :version($distribution.version),
                 :auth($distribution.meta<auth> // Str),
                 :repo(self),
-                :repo-id(self.path-spec),
+                :repo-id(self.repo-id($distribution)),
                 :$distribution,
             );
         }
@@ -235,6 +247,7 @@ class CompUnit::Repository::Lib {
             $link ~~ Str ?? ($link => $link) !! ($link.keys[0] => $link.values[0])
         }
 
+        my @*MODULES;
         my $dist-dir        = self.prefix.child($dist.id) andthen *.mkdir;
         my $sources-dir     = $dist-dir.child('lib');
         my $resources-dir   = $dist-dir.child('resources');
