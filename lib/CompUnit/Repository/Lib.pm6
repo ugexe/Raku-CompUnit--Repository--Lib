@@ -18,51 +18,18 @@ __END__
 :endofperl
 ';
 my $perl_wrapper = '#!/usr/bin/env #perl#
-sub MAIN(:$name is copy, :$auth, :$ver, *@, *%) {
-    shift @*ARGS if $name;
-    shift @*ARGS if $auth;
-    shift @*ARGS if $ver;
-    $name //= \'#dist-name#\';
-    my @installations = $*REPO.repo-chain.grep(CompUnit::Repository::Installable);
-    my @binaries = flat @installations.map: { .files(\'bin/#name#\', :$name, :$auth, :$ver) };
-    unless +@binaries {
-        @binaries = flat @installations.map: { .files(\'bin/#name#\') };
-        if +@binaries {
-            note q:to/SORRY/;
-                ===SORRY!===
-                No candidate found for \'#name#\' that match your criteria.
-                Did you perhaps mean one of these?
-                SORRY
-            my %caps = :name([\'Distribution\', 12]), :auth([\'Author(ity)\', 11]), :ver([\'Version\', 7]);
-            for @binaries -> $dist {
-                for %caps.kv -> $caption, @opts {
-                    @opts[1] = max @opts[1], ($dist{$caption} // \'\').Str.chars
-                }
-            }
-            note \'  \' ~ %caps.values.map({ sprintf(\'%-*s\', .[1], .[0]) }).join(\' | \');
-            for @binaries -> $dist {
-                note \'  \' ~ %caps.kv.map( -> $k, $v { sprintf(\'%-*s\', $v.[1], $dist{$k} // \'\') } ).join(\' | \')
-            }
-        }
-        else {
-            note "===SORRY!===\nNo candidate found for \'#name#\'.\n";
-        }
-        exit 1;
-    }
-    %*ENV<PERL6_PROGRAM_NAME> = $*PROGRAM-NAME;
-    exit run($*EXECUTABLE, @binaries[0].hash.<files><bin/#name#>, @*ARGS).exitcode
+sub MAIN(:$name, :$auth, :$ver, *@, *%) {
+    CompUnit::RepositoryRegistry.run-script("#name#", :$name, :$auth, :$ver);
 }';
 
 class CompUnit::Repository::Lib {
     also does CompUnit::Repository::Installable;
     also does CompUnit::Repository::Locally;
 
-    has $.name;
+    has %!loaded; # cache compunit lookup for self.need(...)
+    has %!seen;   # cache distribution lookup for self!matching-dist(...)
     has $!id;
-
-    has %!dist-metas;
-    has %!resources;
-    has %!loaded;
+    has $!name;
 
     has $!cver = nqp::hllize(nqp::atkey(nqp::gethllsym('perl6', '$COMPILER_CONFIG'), 'version'));
     has $!precomp;
@@ -71,32 +38,124 @@ class CompUnit::Repository::Lib {
 
     my $verbose := nqp::getenvhash<RAKUDO_LOG_PRECOMP>;
 
-    # I wonder if `candidates` should be the Recommendation Manager suggested in S22,
-    # and be separate from CompUnit *loading* functionality.
-    #
-    # role CompUnit::RecommendationManager::Default {
-    proto method candidates(|) {*}
-    multi method candidates(CompUnit::DependencySpecification $spec) {
-        self.candidates(name => $spec.short-name, auth => $spec.auth-matcher, ver  => $spec.version-matcher);
+    submethod BUILD(:$!prefix, :$!lock, :$!WHICH, :$!next-repo, Str :$!name = 'xxx' --> Nil) {
+        CompUnit::RepositoryRegistry.register-name($!name, self);
     }
-    multi method candidates(:$name!, :$auth = '', :version(:$ver) = 0) {
-        gather for self.installed -> $distribution {
-            next unless any($name eq $distribution.meta<name>, |($distribution.meta<provides><<$name>>:exists));
-            next if ?$auth and $distribution.meta<auth> !~~ $auth;
-            next if ?$ver  and $distribution.version !~~ Version.new($ver);
-            take $distribution;
+
+    proto method files(|) {*}
+    multi method files($file, Str:D :$name!, :$auth, :$ver, :$api) {
+        my $spec = CompUnit::DependencySpecification.new(
+            short-name      => $name,
+            auth-matcher    => $auth // True,
+            version-matcher => $ver  // True,
+            api-matcher     => $api  // True,
+        );
+
+        with self.candidates($spec) {
+            my $matches := $_.grep: { .meta<files>{$file}:exists }
+
+            my $absolutified-metas := $matches.map: {
+                my $meta      = $_.meta;
+                $meta<source> = $meta<files>{$file}.IO;
+                $meta;
+            }
+
+            return $absolutified-metas.grep(*.<source>.e);
         }
     }
-    #}
+    multi method files($file, :$auth, :$ver, :$api) {
+        my $spec = CompUnit::DependencySpecification.new(
+            short-name      => $file,
+            auth-matcher    => $auth // True,
+            version-matcher => $ver  // True,
+            api-matcher     => $api  // True,
+        );
+
+        with self.candidates($spec) {
+            my $absolutified-metas := $_.map: {
+                my $meta      = $_.meta;
+                $meta<source> = $meta<files>{$file}.IO;
+                $meta;
+            }
+
+            return $absolutified-metas.grep(*.<source>.e);
+        }
+    }
+
+    proto method candidates(|) {*}
+    multi method candidates(Str:D $name, :$auth, :$ver, :$api) {
+        return samewith(CompUnit::DependencySpecification.new(
+            short-name      => $name,
+            auth-matcher    => $auth // True,
+            version-matcher => $ver  // True,
+            api-matcher     => $api  // True,
+        ));
+    }
+    multi method candidates(CompUnit::DependencySpecification $spec) {
+        return Empty unless $spec.from eq 'Perl6';
+
+        my $version-matcher = ($spec.version-matcher ~~ Bool)
+            ?? $spec.version-matcher
+            !! Version.new($spec.version-matcher);
+        my $api-matcher = ($spec.api-matcher ~~ Bool)
+            ?? $spec.api-matcher
+            !! Version.new($spec.api-matcher);
+
+        my $matching-dists := self.installed.grep: {
+            my $name-matcher = any(
+                $_.meta<name>,
+                |$_.meta<provides>.keys,
+                |$_.meta<provides>.values.map(*.&parse-value),
+                |$_.meta<files>.hash.keys,
+            );
+
+            if $_.meta<provides>{$spec.short-name}
+            // $_.meta<files>{$spec.short-name} -> $source
+            {
+                $_.meta<source> = $_.prefix.child(parse-value($source)).absolute;
+            }
+
+            so $spec.short-name eq $name-matcher
+                and $_.meta<auth> ~~ $spec.auth-matcher
+                and $_.meta<ver>  ~~ $version-matcher
+                and $_.meta<api>  ~~ $api-matcher
+        }
+
+        return $matching-dists;
+    }
+
+    method !matching-dist(CompUnit::DependencySpecification $spec) {
+        return %!seen{~$spec} if %!seen{~$spec}:exists;
+
+        my $dist = self.candidates($spec).head;
+
+        $!lock.protect: {
+            return %!seen{~$spec} //= $dist;
+        }
+    }
 
     my class Distribution::Lib is Distribution::Path {
-        has $!content-id;
+        has $!checksum;
 
-        method Str { "{$.meta<name>}:ver<{$.version // ''}>:auth<{$.meta<auth> // ''}>:api<{$.meta<api> // ''}>" }
-        method version { Version.new(first *.defined, flat $.meta<ver version>, 0) }
+        submethod TWEAK() {
+            self.meta<ver> = Version.new(self.meta<ver> // self.meta<version> // 0);
+            self.meta<files> = self.meta<files>.hash;
+            # self.meta<api> = Version.new(self.meta<api> // 0); # changes self.Str and self.id
+        }
+
+        method Str() {
+            return "{$.meta<name>}"
+            ~ ":ver<{$.meta<ver>   // ''}>"
+            ~ ":auth<{$.meta<auth> // ''}>"
+            ~ ":api<{$.meta<api>   // ''}>";
+        }
+
+        method id() {
+            return nqp::sha1(self.Str);
+        }
 
         # https://github.com/rakudo/rakudo/blob/faea193ec9563f8425a2a59cc4190068adb41c6e/src/core/CompUnit/Repository/FileSystem.pm#L60
-        method id {
+        method checksum {
             my $parts := nqp::list_s;
             my $prefix = self.prefix;
             my $dir  := { .match(/ ^ <.ident> [ <[ ' - ]> <.ident> ]* $ /) }; # ' hl
@@ -105,9 +164,9 @@ class CompUnit::Repository::Lib {
                 || nqp::eqat($file,'.pm6',nqp::sub_i(nqp::chars($file),4))
             };
             nqp::if(
-              $!content-id,
-              $!content-id,
-              ($!content-id = nqp::if(
+              $!checksum,
+              $!checksum,
+              ($!checksum = nqp::if(
                 $prefix.e,
                 nqp::stmts(
                   (my $iter := Rakudo::Internals.DIR-RECURSE(
@@ -140,7 +199,7 @@ class CompUnit::Repository::Lib {
     method can-install { self.prefix.w }
     method installed { $!prefix.IO.dir.grep(*.d).grep(*.child('META6.json').e).map({ self!read-dist($_.basename) }) }
 
-    method !content-address($distribution, *@parts) { reduce { nqp::sha1(join '/', $^a, $^b) }, self.path-spec, @parts }
+    method !content-address($distribution, $name-path) { nqp::sha1($name-path ~ $distribution.id) }
     method !read-dist($dist-id) { Distribution::Lib.new( $!prefix.child($dist-id) ) }
 
     method need(
@@ -154,19 +213,25 @@ class CompUnit::Repository::Lib {
         return %!loaded{~$spec} if %!loaded{~$spec}:exists;
         $RMD("[need] not cached - keep looking...") if $RMD;
 
-        if self.candidates($spec)[0] -> $distribution {
-            my $*RESOURCES = Distribution::Resources.new(:repo(self), :dist-id($distribution.id));
+        with self!matching-dist($spec) {
+            my $id = self!content-address($_, $spec.short-name);
+            return %!loaded{$id} if %!loaded{$id}:exists;
 
-            my $name-path     = $distribution.meta<provides>{$spec.short-name};
-            my $source-path   = $distribution.prefix.child($name-path);
-            my $source-handle = CompUnit::Loader.load-source-file( $source-path );
+            X::CompUnit::UnsatisfiedDependency.new(:specification($spec)).throw
+                unless .meta<source>;
+
+            my $name-path     = parse-value($_.meta<provides>{$spec.short-name});
+            my $source-path   = $_.meta<source>.IO;
+            my $source-handle = CompUnit::Loader.load-source-file($source-path);
 
             $RMD("[need] name-path:{$name-path}=$source-path source-handle:{$source-handle.perl}") if $RMD;
 
+            my $*RESOURCES = Distribution::Resources.new(:repo(self), :dist-id($_.id));
             my $precomp-handle = $precomp.try-load(
                 CompUnit::PrecompilationDependency::File.new(
-                    :id(CompUnit::PrecompilationId.new(self!content-address($distribution, $name-path))),
+                    :id(CompUnit::PrecompilationId.new($id)),
                     :src($source-path.absolute),
+                    :checksum($_.meta<checksum>:exists ?? $_.meta<checksum> !! Str),
                     :$spec,
                 ),
                 :source($source-path),
@@ -175,12 +240,12 @@ class CompUnit::Repository::Lib {
             my $compunit = CompUnit.new(
                 :handle($precomp-handle // $source-handle),
                 :short-name($spec.short-name),
-                :version($distribution.version),
-                :auth($distribution.meta<auth> // Str),
+                :version($_.meta<ver>),
+                :auth($_.meta<auth> // Str),
                 :repo(self),
-                :repo-id(self.repo-id($distribution)),
+                :repo-id($id),
                 :precompiled(defined $precomp-handle),
-                :$distribution,
+                :distribution($_),
             );
 
             $RMD("[need] taking compunit {$compunit // 'WTF ???'}") if $RMD;
@@ -192,39 +257,26 @@ class CompUnit::Repository::Lib {
     }
 
     method resolve(CompUnit::DependencySpecification $spec) returns CompUnit {
-        if self.candidates($spec)[0] -> $distribution {
+        with self!matching-dist($spec) {
             return CompUnit.new(
                 :handle(CompUnit::Handle),
                 :short-name($spec.short-name),
-                :version($distribution.version),
-                :auth($distribution.meta<auth> // Str),
+                :version($_.meta<ver>),
+                :auth($_.meta<auth> // Str),
                 :repo(self),
-                :repo-id(self.repo-id($distribution)),
-                :$distribution,
+                :repo-id(self!content-address($_, $spec.short-name)),
+                :distribution($_),
             );
         }
+
         return self.next-repo.resolve($spec) if self.next-repo;
         Nil
     }
 
 
     method resource($dist-id, $key) {
-        self.prefix.child($dist-id).child("resources/$key");
+        self.prefix.child($dist-id).child("$key");
     }
-
-    method files($name-path, *%spec [:$name, :$auth, :$ver]) {
-        my $distributions := $name
-            ?? self.candidates(|%spec)
-            !! self.installed
-                .grep({!$auth || .meta<auth> ~~ $auth})
-                .grep({!$ver  || .version ~~ Version.new($ver)});
-        gather for $distributions -> $dist {
-            my @dist-name-paths = $dist.meta<files>.map(*.&parse-value);
-            next if $name-path ~~ none(@dist-name-paths);
-            take $dist.meta;
-        }
-    }
-
 
     my sub parse-value($str-or-kv) {
         do given $str-or-kv {
@@ -236,11 +288,9 @@ class CompUnit::Repository::Lib {
 
     method install(Distribution $distribution, Bool :$force, Bool :$precompile = True) {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
-        fail "$dist already installed" if not $force and $dist.id ~~ self.installed.any;
+        fail "$dist already installed" if not $force and $dist.id ~~ self.installed.map(*.id).any;
 
-        my %files = $dist.meta<files>.grep(*.defined).map: -> $link {
-            $link ~~ Str ?? ($link => $link) !! ($link.keys[0] => $link.values[0])
-        }
+        my %files = $dist.meta<files>.grep(*.defined).map({ $_ ~~ Str ?? ($_ => $_) !! ($_.keys[0] => $_.values[0]) }).hash;
 
         my @*MODULES;
         my $dist-dir        = self.prefix.child($dist.id) andthen *.mkdir;
@@ -302,7 +352,6 @@ class CompUnit::Repository::Lib {
         }
 
         my %meta = %($dist.meta);
-        %!dist-metas{$dist.id} = %meta;
         $dist-dir.child('META6.json').spurt: Rakudo::Internals::JSON.to-json(%meta);
 
         # reset cached id so it's generated again on next access.
@@ -312,6 +361,8 @@ class CompUnit::Repository::Lib {
         self!precompile-distribution($installed-distribution) if ?$precompile;
         return $installed-distribution;
     }
+
+    ### Precomp stuff beyond this point
 
    method !precompile-distribution(Distribution $distribution is copy) {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
@@ -355,9 +406,6 @@ class CompUnit::Repository::Lib {
             PROCESS::<$REPO> := $head;
         }
     }
-
-
-    ### Precomp stuff
 
     method !precomp-stores() {
         $!precomp-stores //= Array[CompUnit::PrecompilationStore].new(

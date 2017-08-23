@@ -2,18 +2,18 @@ use Test;
 plan 2;
 
 use CompUnit::Repository::Lib;
-use lib "CompUnit::Repository::Lib#{$?FILE.IO.parent.child('test-libs')}";
+use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent.child('test-libs')}";
 
 
 my $matching-spec = CompUnit::DependencySpecification.new(
-    short-name      => 'Zef::Client',
+    short-name      => 'Acme::Foo',
     auth-matcher    => 'github:ugexe',
-    version-matcher => '*',
+    version-matcher => '0',
 );
 my $missing-spec = CompUnit::DependencySpecification.new(
-    short-name      => 'Zef::Client',
+    short-name      => 'Acme::Foo',
     auth-matcher    => 'cpan:ugexe',
-    version-matcher => '*',
+    version-matcher => '666',
 );
 
 

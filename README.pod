@@ -15,9 +15,9 @@ Load modules and install modules to the development style lib/original-path
 
     use lib "CompUnit::Repository::Lib#{$*CWD/t/test-libs}";
 
-    require <lib/Zef.pm6>; # `require` by relative path
-    require <Zef::Client>; # `require` by name
-    use Zef::CLI;          # `use` by name
+    require <lib/Acme/Foo.pm6>; # `require` by relative path
+    require <Acme::Foo>;        # `require` by name
+    use Acme::Foo;              # `use` by name
 
 See: L<tests|https://github.com/ugexe/Perl6-CompUnit--Repository--Lib/blob/master/t>
 

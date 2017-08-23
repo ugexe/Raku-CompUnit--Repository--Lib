@@ -3,25 +3,24 @@ use Test;
 plan 2;
 
 use CompUnit::Repository::Lib;
-use lib "CompUnit::Repository::Lib#{$?FILE.IO.parent.child('test-libs')}";
-
-
-subtest {
-    {
-        nok '$!dist' ~~ any( ::("Candidate").^attributes>>.name ), 'module not yet loaded';
-    }
-    {
-        use Zef;
-        ok '$!dist' ~~ any( ::("Candidate").^attributes>>.name ),  'module is accessable';
-    }
-}, 'use module with no dependencies';
+use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent.child('test-libs').absolute}";
 
 subtest {
     {
-        nok '$!config' ~~ any( ::("Zef::Client").^attributes>>.name ), 'module not yet loaded';
+        dies-ok { ::("Acme::Foo")<&acme-foo-source-file>() };
     }
     {
-        use Zef::Client;
-        ok '$!config' ~~ any( ::("Zef::Client").^attributes>>.name ),  'module loaded';
+        use-ok("Acme::Foo"), 'module use-d ok';
     }
-}, 'use modules with multi-level dependency chain';
+}, 'require module with no external dependencies';
+
+subtest {
+    {
+        dies-ok { ::("Acme::Depends::On::Acme::Foo")<&dependency-source-file>() };
+    }
+    {
+        use-ok("Acme::Depends::On::Acme::Foo"), 'module use-d ok';
+    }
+}, 'require modules with external dependency chain';
+
+done-testing;
