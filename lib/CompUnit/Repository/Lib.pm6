@@ -350,7 +350,7 @@ class CompUnit::Repository::Lib {
     ### Precomp stuff beyond this point
 
    method !precompile-distribution-by-id($dist-id) {
-        my $dist = self.read-dist($dist-id);
+        my $dist = self!read-dist($dist-id);
 
         {
             my $head = $*REPO;
