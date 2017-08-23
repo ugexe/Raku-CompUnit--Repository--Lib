@@ -21,6 +21,9 @@ before_install:
     - cd $HOME/rakudo
     - perl Configure.pl $VM_OPTS --gen-nqp --backends=$BACKEND
     - make install
+    - export PATH=$HOME/rakudo/install/bin:$PATH
+    - export PATH=$HOME/rakudo/install/share/perl6/site/bin:$PATH
+    - cd $TRAVIS_BUILD_DIR
 
 install:
     - perl6 -v
