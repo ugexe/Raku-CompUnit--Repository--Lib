@@ -190,7 +190,7 @@ class CompUnit::Repository::Lib {
     method id { $!id //= self.installed.map(*.id).sort.reduce({ nqp::sha1($^a, $^b) }) }
 
     method short-id { 'lib' }
-    method path-spec { "CompUnit::Repository::Lib#name({$!name // 'wut'})#{self.prefix.absolute}" }
+    method path-spec { "CompUnit::Repository::Lib#name({$!name // 'lol'})#{self.prefix.absolute}" }
 
     method repo-id($distribution) { self.path-spec ~ '/' ~ $distribution.id }
 
@@ -290,15 +290,9 @@ class CompUnit::Repository::Lib {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
         fail "$dist already installed" if not $force and $dist.id ~~ self.installed.map(*.id).any;
 
-        my %files = $dist.meta<files>.grep(*.defined).map({ $_ ~~ Str ?? ($_ => $_) !! ($_.keys[0] => $_.values[0]) }).hash;
-
         my @*MODULES;
-        my $dist-dir        = self.prefix.child($dist.id) andthen *.mkdir;
-        my $sources-dir     = $dist-dir.child('lib');
-        my $resources-dir   = $dist-dir.child('resources');
-        my $bin-dir         = $dist-dir.child('bin');
-        my $bin-wrapper-dir = self.prefix.child('bin');
-        my $is-win          = Rakudo::Internals.IS-WIN;
+        my $dist-dir = self.prefix.child($dist.id) andthen *.mkdir;
+        my $is-win   = Rakudo::Internals.IS-WIN;
 
         my $implicit-files := $dist.meta<provides>.values;
         my $explicit-files := $dist.meta<files>;
@@ -317,9 +311,7 @@ class CompUnit::Repository::Lib {
                 when /^@provides$/ {
                     my $name = %pm6-path2name{$name-path};
                     note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
-                    my $content = $handle.open.slurp-rest(:bin,:close);
-                    $destination.spurt($content);
-                    $handle.close;
+                    $destination.spurt( $handle.open(:bin).slurp(:close) );
                 }
 
                 when /^bin\// {
@@ -336,72 +328,59 @@ class CompUnit::Repository::Lib {
                             $.prefix.child("$withoutext$be").IO.chmod(0o755);
                         }
                     }
-                    my $content = $handle.open.slurp-rest(:bin, :close);
-                    $destination.spurt($content);
-                    $handle.close;
+                    $destination.spurt( $handle.open(:bin).slurp(:close) );
                 }
 
                 when /^resources\/$<subdir>=(.*)/ {
                     my $subdir = $<subdir>; # maybe do something with libraries
-
-                    my $content = $handle.open.slurp-rest(:bin, :close);
-                    $destination.spurt($content);
-                    $handle.close;
+                    $destination.spurt( $handle.open(:bin).slurp(:close) );
                 }
             }
         }
 
-        my %meta = %($dist.meta);
-        $dist-dir.child('META6.json').spurt: Rakudo::Internals::JSON.to-json(%meta);
+        $dist-dir.child('META6.json').spurt: Rakudo::Internals::JSON.to-json($dist.meta.hash);
 
         # reset cached id so it's generated again on next access.
         # identity changes with every installation of a dist.
         $!id = Any;
-        my $installed-distribution = Distribution::Path.new($dist-dir);
-        self!precompile-distribution($installed-distribution) if ?$precompile;
-        return $installed-distribution;
+        self!precompile-distribution-by-id($dist.id) if ?$precompile;
+        return $dist;
     }
 
     ### Precomp stuff beyond this point
 
-   method !precompile-distribution(Distribution $distribution is copy) {
-        my $dist = CompUnit::Repository::Distribution.new($distribution);
-        my $precomp    = $*REPO.precomp-repository;
-        my $*RESOURCES = Distribution::Resources.new(:repo(self), dist-id => $dist.id);
-        my %done;
-
-        my $dist-dir    = self.prefix.child($dist.id) andthen *.mkdir;
-        my $sources-dir = $dist-dir.child('lib');
+   method !precompile-distribution-by-id($dist-id) {
+        my $dist = self.read-dist($dist-id);
 
         {
             my $head = $*REPO;
             PROCESS::<$REPO> := self; # Precomp files should only depend on downstream repos
             my $precomp = $*REPO.precomp-repository;
-            my $*RESOURCES = Distribution::Resources.new(:repo(self), dist-id => $dist.id);
+            my $*RESOURCES = Distribution::Resources.new(:repo(self), dist-id => $dist-id);
             my %done;
             my %provides = $dist.meta<provides>;
 
             my $compiler-id = CompUnit::PrecompilationId.new($*PERL.compiler.id);
             for %provides.kv -> $name, $name-path {
-                my $id = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
-                $precomp.store.delete($compiler-id, $id);
+                my $precomp-id = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
+                $precomp.store.delete($compiler-id, $precomp-id);
             }
 
             for %provides.kv -> $name, $name-path {
-                my $id = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
-                my $source-file = $distribution.prefix.child($name-path);
+                my $precomp-id  = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
+                my $source-file = self.prefix.child($dist-id).child($name-path);
 
-                if %done{$id} {
-                    note "(Already did $id)" if $verbose;
+                if %done{$precomp-id} {
+                    note "(Already did $precomp-id)" if $verbose;
                     next;
                 }
-                note("Precompiling $id ($name)") if $verbose;
+                note("Precompiling $precomp-id ($name)") if $verbose;
                 $precomp.precompile(
                     $source-file,
-                    $id,
+                    $precomp-id,
                     :source-name("$source-file ($name)"),
                 );
-                %done{$id} = 1;
+                %done{$precomp-id} = 1;
             }
             PROCESS::<$REPO> := $head;
         }

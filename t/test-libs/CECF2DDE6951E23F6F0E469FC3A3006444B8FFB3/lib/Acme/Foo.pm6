@@ -1,5 +1,5 @@
 unit module Acme::Foo;
-use Acme::Foo::Resources:auth<github:ugexe>:ver<0>;;
+use Acme::Foo::Resources:auth<github:ugexe>:ver<0>;
 
 our sub acme-foo-source-file is export { $*PROGRAM.absolute }
 
