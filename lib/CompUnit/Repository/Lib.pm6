@@ -22,6 +22,14 @@ sub MAIN(:$name, :$auth, :$ver, *@, *%) {
     CompUnit::RepositoryRegistry.run-script("#name#", :$name, :$auth, :$ver);
 }';
 
+my sub parse-value($str-or-kv) {
+    do given $str-or-kv {
+        when Str  { $_ }
+        when Hash { $_.keys[0] }
+        when Pair { $_.key     }
+    }
+}
+
 class CompUnit::Repository::Lib {
     also does CompUnit::Repository::Installable;
     also does CompUnit::Repository::Locally;
@@ -38,8 +46,65 @@ class CompUnit::Repository::Lib {
 
     my $verbose := nqp::getenvhash<RAKUDO_LOG_PRECOMP>;
 
-    submethod BUILD(:$!prefix, :$!lock, :$!WHICH, :$!next-repo, Str :$!name = 'xxx' --> Nil) {
+    submethod BUILD(:$!prefix, :$!lock, :$!WHICH, :$!next-repo, Str :$!name = 'lol' --> Nil) {
         CompUnit::RepositoryRegistry.register-name($!name, self);
+    }
+
+    my class Distribution::Lib is Distribution::Path {
+        has $!checksum;
+
+        submethod TWEAK() {
+            self.meta<ver> = Version.new(self.meta<ver> // self.meta<version> // 0);
+            self.meta<files> = self.meta<files>.hash;
+            # self.meta<api> = Version.new(self.meta<api> // 0); # changes self.Str and self.id
+        }
+
+        method Str() {
+            return "{$.meta<name>}"
+            ~ ":ver<{$.meta<ver>   // ''}>"
+            ~ ":auth<{$.meta<auth> // ''}>"
+            ~ ":api<{$.meta<api>   // ''}>";
+        }
+
+        method id() {
+            return nqp::sha1(self.Str);
+        }
+
+        # https://github.com/rakudo/rakudo/blob/faea193ec9563f8425a2a59cc4190068adb41c6e/src/core/CompUnit/Repository/FileSystem.pm#L60
+        method checksum {
+            my $parts := nqp::list_s;
+            my $prefix = $.prefix;
+            my $dir  := { .match(/ ^ <.ident> [ <[ ' - ]> <.ident> ]* $ /) }; # ' hl
+            my $file := -> str $file {
+                nqp::eqat($file,'.pm',nqp::sub_i(nqp::chars($file),3))
+                || nqp::eqat($file,'.pm6',nqp::sub_i(nqp::chars($file),4))
+            };
+            nqp::if(
+              $!checksum,
+              $!checksum,
+              ($!checksum = nqp::if(
+                $prefix.e,
+                nqp::stmts(
+                  (my $iter := Rakudo::Internals.DIR-RECURSE(
+                    $prefix.absolute,:$dir,:$file).iterator),
+                  nqp::until(
+                    nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
+                    nqp::if(
+                      nqp::filereadable($pulled),
+                      nqp::push_s($parts,nqp::sha1(slurp($pulled, :enc<iso-8859-1>))),
+                    )
+                  ),
+                  nqp::sha1(nqp::join('',$parts))
+                ),
+                nqp::sha1('')
+              ))
+            )
+        }
+    }
+
+    method installed(--> Seq) {
+        my $dist-dirs := $!prefix.IO.dir.grep(*.d).grep(*.child('META6.json').e);
+        return $dist-dirs.map: { self!read-dist($_.basename) }
     }
 
     proto method files(|) {*}
@@ -134,70 +199,13 @@ class CompUnit::Repository::Lib {
         }
     }
 
-    my class Distribution::Lib is Distribution::Path {
-        has $!checksum;
-
-        submethod TWEAK() {
-            self.meta<ver> = Version.new(self.meta<ver> // self.meta<version> // 0);
-            self.meta<files> = self.meta<files>.hash;
-            # self.meta<api> = Version.new(self.meta<api> // 0); # changes self.Str and self.id
-        }
-
-        method Str() {
-            return "{$.meta<name>}"
-            ~ ":ver<{$.meta<ver>   // ''}>"
-            ~ ":auth<{$.meta<auth> // ''}>"
-            ~ ":api<{$.meta<api>   // ''}>";
-        }
-
-        method id() {
-            return nqp::sha1(self.Str);
-        }
-
-        # https://github.com/rakudo/rakudo/blob/faea193ec9563f8425a2a59cc4190068adb41c6e/src/core/CompUnit/Repository/FileSystem.pm#L60
-        method checksum {
-            my $parts := nqp::list_s;
-            my $prefix = self.prefix;
-            my $dir  := { .match(/ ^ <.ident> [ <[ ' - ]> <.ident> ]* $ /) }; # ' hl
-            my $file := -> str $file {
-                nqp::eqat($file,'.pm',nqp::sub_i(nqp::chars($file),3))
-                || nqp::eqat($file,'.pm6',nqp::sub_i(nqp::chars($file),4))
-            };
-            nqp::if(
-              $!checksum,
-              $!checksum,
-              ($!checksum = nqp::if(
-                $prefix.e,
-                nqp::stmts(
-                  (my $iter := Rakudo::Internals.DIR-RECURSE(
-                    $prefix.absolute,:$dir,:$file).iterator),
-                  nqp::until(
-                    nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-                    nqp::if(
-                      nqp::filereadable($pulled),
-                      nqp::push_s($parts,nqp::sha1(slurp($pulled, :enc<iso-8859-1>))),
-                    )
-                  ),
-                  nqp::sha1(nqp::join('',$parts))
-                ),
-                nqp::sha1('')
-              ))
-            )
-        }
-    }
-
-    # When new module is installed $!id is set to Any so that this gets re-run
-    method id { $!id //= self.installed.map(*.id).sort.reduce({ nqp::sha1($^a, $^b) }) }
-
-    method short-id { 'lib' }
-    method path-spec { "CompUnit::Repository::Lib#name({$!name // 'lol'})#{self.prefix.absolute}" }
-
-    method repo-id($distribution) { self.path-spec ~ '/' ~ $distribution.id }
-
-    method loaded returns Iterable { %!loaded.values }
-    method prefix { $!prefix.IO }
-    method can-install { self.prefix.w }
-    method installed { $!prefix.IO.dir.grep(*.d).grep(*.child('META6.json').e).map({ self!read-dist($_.basename) }) }
+    method loaded(--> Iterable:D)  { %!loaded.values }
+    method prefix(--> IO::Path:D)  { $!prefix.IO }
+    method name(--> Str:D)         { $!name }
+    method short-id(--> Str:D)     { 'lib' }
+    method id(--> Str:D)           { $!id //= self.installed.map(*.id).sort.reduce({ nqp::sha1($^a, $^b) }) }
+    method path-spec(--> Str:D)    { "CompUnit::Repository::Lib#name({$!name // 'lol'})#{self.prefix.absolute}" }
+    method can-install(--> Bool:D) { $.prefix.w || ?(!$.prefix.e && try { $.prefix.mkdir } && $.prefix.e) }
 
     method !content-address($distribution, $name-path) { nqp::sha1($name-path ~ $distribution.id) }
     method !read-dist($dist-id) { Distribution::Lib.new( $!prefix.child($dist-id) ) }
@@ -206,8 +214,7 @@ class CompUnit::Repository::Lib {
         CompUnit::DependencySpecification  $spec,
         CompUnit::PrecompilationRepository $precomp        = self.precomp-repository(),
         CompUnit::PrecompilationStore     :@precomp-stores = self!precomp-stores(),
-    )
-        returns CompUnit:D
+        --> CompUnit:D)
     {
         $RMD("[need] -> {$spec.perl}") if $RMD;
         return %!loaded{~$spec} if %!loaded{~$spec}:exists;
@@ -229,23 +236,23 @@ class CompUnit::Repository::Lib {
             my $*RESOURCES = Distribution::Resources.new(:repo(self), :dist-id($_.id));
             my $precomp-handle = $precomp.try-load(
                 CompUnit::PrecompilationDependency::File.new(
-                    :id(CompUnit::PrecompilationId.new($id)),
-                    :src($source-path.absolute),
-                    :checksum($_.meta<checksum>:exists ?? $_.meta<checksum> !! Str),
-                    :$spec,
+                    id       => CompUnit::PrecompilationId.new($id),
+                    src      => $source-path.absolute,
+                    checksum => ($_.meta<checksum>:exists ?? $_.meta<checksum> !! Str),
+                    spec     => $spec,
                 ),
                 :source($source-path),
                 :@precomp-stores,
             );
             my $compunit = CompUnit.new(
-                :handle($precomp-handle // $source-handle),
-                :short-name($spec.short-name),
-                :version($_.meta<ver>),
-                :auth($_.meta<auth> // Str),
-                :repo(self),
-                :repo-id($id),
-                :precompiled(defined $precomp-handle),
-                :distribution($_),
+                handle       => ($precomp-handle // $source-handle),
+                short-name   => $spec.short-name,
+                version      => $_.meta<ver>,
+                auth         => ($_.meta<auth> // Str),
+                repo         => self,
+                repo-id      => $id,
+                precompiled  => $precomp-handle.defined,
+                distribution => $_,
             );
 
             $RMD("[need] taking compunit {$compunit // 'WTF ???'}") if $RMD;
@@ -256,7 +263,7 @@ class CompUnit::Repository::Lib {
         X::CompUnit::UnsatisfiedDependency.new(:specification($spec)).throw;
     }
 
-    method resolve(CompUnit::DependencySpecification $spec) returns CompUnit {
+    method resolve(CompUnit::DependencySpecification $spec --> CompUnit:D) {
         with self!matching-dist($spec) {
             return CompUnit.new(
                 :handle(CompUnit::Handle),
@@ -274,16 +281,8 @@ class CompUnit::Repository::Lib {
     }
 
 
-    method resource($dist-id, $key) {
+    method resource($dist-id, $key --> IO::Path) {
         self.prefix.child($dist-id).child("$key");
-    }
-
-    my sub parse-value($str-or-kv) {
-        do given $str-or-kv {
-            when Str  { $_ }
-            when Hash { $_.keys[0] }
-            when Pair { $_.key     }
-        }
     }
 
     method install(Distribution $distribution, Bool :$force, Bool :$precompile = True) {
@@ -300,9 +299,8 @@ class CompUnit::Repository::Lib {
             grep *.defined, $implicit-files.Slip, $explicit-files.Slip;
 
         for @$all-files -> $name-path {
-            # xxx: should really handle hash leaf nodes like Distribution does
             state %pm6-path2name = $dist.meta<provides>.antipairs;
-            state @provides = $dist.meta<provides>.values; # only meant for use in a regex /^@provides/
+            state @provides      = $dist.meta<provides>.values;
 
             given $name-path {
                 my $handle := $dist.content($name-path);
@@ -315,11 +313,13 @@ class CompUnit::Repository::Lib {
                 }
 
                 when /^bin\// {
+                    my $name        = $name-path.subst(/^bin\//, '');
                     my $withoutext  = $name-path.subst(/\.[exe|bat]$/, '');
+
                     for '', '-j', '-m' -> $be {
                         mkdir $.prefix.child("$withoutext$be").IO.parent;
                         $.prefix.child("$withoutext$be").IO.spurt:
-                            $perl_wrapper.subst('#name#', $name-path.IO.basename, :g).subst('#perl#', "perl6$be").subst('#dist-name#', $dist.meta<name>);
+                            $perl_wrapper.subst('#name#', $name, :g).subst('#perl#', "perl6$be");
                         if $is-win {
                             $.prefix.child("$withoutext$be.bat").IO.spurt:
                                 $windows_wrapper.subst('#perl#', "perl6$be", :g);
@@ -328,6 +328,7 @@ class CompUnit::Repository::Lib {
                             $.prefix.child("$withoutext$be").IO.chmod(0o755);
                         }
                     }
+
                     $destination.spurt( $handle.open(:bin).slurp(:close) );
                 }
 
@@ -338,7 +339,7 @@ class CompUnit::Repository::Lib {
             }
         }
 
-        $dist-dir.child('META6.json').spurt: Rakudo::Internals::JSON.to-json($dist.meta.hash);
+        spurt( $dist-dir.child('META6.json').absolute, Rakudo::Internals::JSON.to-json($dist.meta.hash) );
 
         # reset cached id so it's generated again on next access.
         # identity changes with every installation of a dist.
@@ -349,41 +350,40 @@ class CompUnit::Repository::Lib {
 
     ### Precomp stuff beyond this point
 
-   method !precompile-distribution-by-id($dist-id) {
-        my $dist = self!read-dist($dist-id);
+   method !precompile-distribution-by-id($dist-id --> Bool:D) {
+        my $dist         = self!read-dist($dist-id);
+        my $precomp-repo = self.precomp-repository;
 
-        {
-            my $head = $*REPO;
-            PROCESS::<$REPO> := self; # Precomp files should only depend on downstream repos
-            my $precomp = $*REPO.precomp-repository;
-            my $*RESOURCES = Distribution::Resources.new(:repo(self), dist-id => $dist-id);
-            my %done;
-            my %provides = $dist.meta<provides>;
-
-            my $compiler-id = CompUnit::PrecompilationId.new($*PERL.compiler.id);
-            for %provides.kv -> $name, $name-path {
-                my $precomp-id = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
-                $precomp.store.delete($compiler-id, $precomp-id);
+        $!lock.protect: {
+            for $dist.meta<provides>.hash.kv -> $name, $name-path {
+                state $compiler-id = CompUnit::PrecompilationId.new($*PERL.compiler.id);
+                my $precomp-id     = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
+                $precomp-repo.store.delete($compiler-id, $precomp-id);
             }
 
-            for %provides.kv -> $name, $name-path {
-                my $precomp-id  = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
-                my $source-file = self.prefix.child($dist-id).child($name-path);
+            {
+                ENTER my $head = $*REPO;
+                ENTER PROCESS::<$REPO> := self; # Precomp files should only depend on downstream repos
+                LEAVE PROCESS::<$REPO> := $head;
 
-                if %done{$precomp-id} {
-                    note "(Already did $precomp-id)" if $verbose;
-                    next;
+                my $*RESOURCES = Distribution::Resources.new(:repo(self), :$dist-id);
+                for $dist.meta<provides>.hash.kv -> $name, $name-path {
+                    my $precomp-id  = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
+                    my $source-file = self.prefix.child($dist-id).child($name-path);
+
+                    state %done;
+                    if %done{$precomp-id}++ {
+                        note "(Already did $precomp-id)" if $verbose;
+                        next;
+                    }
+
+                    note("Precompiling $precomp-id ($name)") if $verbose;
+                    $precomp-repo.precompile($source-file, $precomp-id, :source-name("$source-file ($name)"));
                 }
-                note("Precompiling $precomp-id ($name)") if $verbose;
-                $precomp.precompile(
-                    $source-file,
-                    $precomp-id,
-                    :source-name("$source-file ($name)"),
-                );
-                %done{$precomp-id} = 1;
             }
-            PROCESS::<$REPO> := $head;
         }
+
+        return True;
     }
 
     method !precomp-stores() {
@@ -392,13 +392,13 @@ class CompUnit::Repository::Lib {
         )
     }
 
-    method precomp-store() returns CompUnit::PrecompilationStore {
+    method precomp-store(--> CompUnit::PrecompilationStore) {
         $!precomp-store //= CompUnit::PrecompilationStore::File.new(
             :prefix(self.prefix.child('.precomp')),
         )
     }
 
-    method precomp-repository() returns CompUnit::PrecompilationRepository {
+    method precomp-repository(--> CompUnit::PrecompilationRepository) {
         $!precomp := CompUnit::PrecompilationRepository::Default.new(
             :store(self.precomp-store),
         ) unless $!precomp;
