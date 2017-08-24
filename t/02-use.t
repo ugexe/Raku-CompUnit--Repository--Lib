@@ -7,7 +7,7 @@ use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent.child('test-libs').absolute
 
 subtest {
     {
-        dies-ok { ::("Acme::Foo")<&acme-foo-source-file>() };
+        dies-ok { ::("Acme::Foo") };
     }
     {
         use-ok("Acme::Foo"), 'module use-d ok';
@@ -16,7 +16,7 @@ subtest {
 
 subtest {
     {
-        dies-ok { ::("Acme::Depends::On::Acme::Foo")<&dependency-source-file>() };
+        dies-ok { ::("Acme::Depends::On::Acme::Foo") };
     }
     {
         use-ok("Acme::Depends::On::Acme::Foo"), 'module use-d ok';
