@@ -12,6 +12,7 @@ subtest {
     my $install-to-path = $*TMPDIR.child('perl6-cur-lib').child(time).child((^1000000).pick) andthen *.mkdir;
     my $install-to-repo = CompUnit::Repository::Lib.new(prefix => $install-to-path.absolute);
     lives-ok { $install-to-repo.install($distribution, :!precompile) }, "Installed to $install-to-path";
+    lives-ok { $install-to-repo.uninstall($distribution) }, "Uninstalled from $install-to-path";
 }, 'Skip precompiling during installation';
 
 subtest {

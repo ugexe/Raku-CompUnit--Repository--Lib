@@ -285,6 +285,48 @@ class CompUnit::Repository::Lib {
         self.prefix.child($dist-id).child("$key");
     }
 
+    method uninstall(Distribution $distribution) {
+        my $dist      = CompUnit::Repository::Distribution.new($distribution);
+        my $dist-dir  = self.prefix.child($dist.id);
+
+        my &unlink-if-exists := -> $path {
+                $path.IO.d ?? (try { rmdir($path)  }) 
+            !!  $path.IO.f ?? (try { unlink($path) })
+            !! False
+        }
+
+        my &recursively-delete-empty-dirs := -> @_ {
+            my @dirs = @_.grep(*.IO.d).map(*.&dir).map(*.Slip);
+            &?BLOCK(@dirs) if +@dirs;
+            unlink-if-exists( $_ ) for @dirs;
+        }
+
+        # special directory files
+        for $dist.meta<files>.hash.kv -> $name-path, $file {
+            # wrappers are located in "repos $bin-dir" (not dist repo)
+            if $name-path.starts-with('bin/') && self.files($name-path).elems {
+                unlink-if-exists( self.prefix.child("$name-path$_") ) for '', '-m', '-j';
+                recursively-delete-empty-dirs([ self.prefix.child('bin') ]);
+                unlink-if-exists( self.prefix.child('bin/') );
+            }
+
+            # distribution's bin/ and resources/
+            unlink-if-exists( $dist-dir.child($name-path.IO.parent).child($file.IO.basename) );
+        }
+
+        # module/lib files
+        for $dist.meta<provides>.hash.values.map(*.&parse-value) -> $name-path {
+            unlink-if-exists( $dist-dir.child($name-path) );
+        }
+
+        # meta
+        unlink-if-exists( $dist-dir.child("META6.json") );
+
+        # delete remaining empty directories recursively
+        recursively-delete-empty-dirs([$dist-dir]);
+        unlink-if-exists( $dist-dir );
+    }
+
     method install(Distribution $distribution, Bool :$force, Bool :$precompile = True) {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
         fail "$dist already installed" if not $force and $dist.id ~~ self.installed.map(*.id).any;
