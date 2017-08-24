@@ -331,63 +331,65 @@ class CompUnit::Repository::Lib {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
         fail "$dist already installed" if not $force and $dist.id ~~ self.installed.map(*.id).any;
 
-        my @*MODULES;
-        my $dist-dir = self.prefix.child($dist.id) andthen *.mkdir;
-        my $is-win   = Rakudo::Internals.IS-WIN;
+        $!lock.protect: {
+            my @*MODULES;
+            my $dist-dir = self.prefix.child($dist.id) andthen *.mkdir;
+            my $is-win   = Rakudo::Internals.IS-WIN;
 
-        my $implicit-files := $dist.meta<provides>.values;
-        my $explicit-files := $dist.meta<files>;
-        my $all-files      := unique map { $_ ~~ Str ?? $_ !! $_.keys[0] },
-            grep *.defined, $implicit-files.Slip, $explicit-files.Slip;
+            my $implicit-files := $dist.meta<provides>.values;
+            my $explicit-files := $dist.meta<files>;
+            my $all-files      := unique map { $_ ~~ Str ?? $_ !! $_.keys[0] },
+                grep *.defined, $implicit-files.Slip, $explicit-files.Slip;
 
-        for @$all-files -> $name-path {
-            state %pm6-path2name = $dist.meta<provides>.antipairs;
-            state @provides      = $dist.meta<provides>.values;
+            for @$all-files -> $name-path {
+                state %pm6-path2name = $dist.meta<provides>.antipairs;
+                state @provides      = $dist.meta<provides>.values;
 
-            given $name-path {
-                my $handle := $dist.content($name-path);
-                my $destination = $dist-dir.child($name-path) andthen *.parent.mkdir;
+                given $name-path {
+                    my $handle := $dist.content($name-path);
+                    my $destination = $dist-dir.child($name-path) andthen *.parent.mkdir;
 
-                when /^@provides$/ {
-                    my $name = %pm6-path2name{$name-path};
-                    note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
-                    $destination.spurt( $handle.open(:bin).slurp(:close) );
-                }
-
-                when /^bin\// {
-                    my $name        = $name-path.subst(/^bin\//, '');
-                    my $withoutext  = $name-path.subst(/\.[exe|bat]$/, '');
-
-                    for '', '-j', '-m' -> $be {
-                        mkdir $.prefix.child("$withoutext$be").IO.parent;
-                        $.prefix.child("$withoutext$be").IO.spurt:
-                            $perl_wrapper.subst('#name#', $name, :g).subst('#perl#', "perl6$be");
-                        if $is-win {
-                            $.prefix.child("$withoutext$be.bat").IO.spurt:
-                                $windows_wrapper.subst('#perl#', "perl6$be", :g);
-                        }
-                        else {
-                            $.prefix.child("$withoutext$be").IO.chmod(0o755);
-                        }
+                    when /^@provides$/ {
+                        my $name = %pm6-path2name{$name-path};
+                        note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
+                        $destination.spurt( $handle.open(:bin).slurp(:close) );
                     }
 
-                    $destination.spurt( $handle.open(:bin).slurp(:close) );
-                }
+                    when /^bin\// {
+                        my $name        = $name-path.subst(/^bin\//, '');
+                        my $withoutext  = $name-path.subst(/\.[exe|bat]$/, '');
 
-                when /^resources\/$<subdir>=(.*)/ {
-                    my $subdir = $<subdir>; # maybe do something with libraries
-                    $destination.spurt( $handle.open(:bin).slurp(:close) );
+                        for '', '-j', '-m' -> $be {
+                            mkdir $.prefix.child("$withoutext$be").IO.parent;
+                            $.prefix.child("$withoutext$be").IO.spurt:
+                                $perl_wrapper.subst('#name#', $name, :g).subst('#perl#', "perl6$be");
+                            if $is-win {
+                                $.prefix.child("$withoutext$be.bat").IO.spurt:
+                                    $windows_wrapper.subst('#perl#', "perl6$be", :g);
+                            }
+                            else {
+                                $.prefix.child("$withoutext$be").IO.chmod(0o755);
+                            }
+                        }
+
+                        $destination.spurt( $handle.open(:bin).slurp(:close) );
+                    }
+
+                    when /^resources\/$<subdir>=(.*)/ {
+                        my $subdir = $<subdir>; # maybe do something with libraries
+                        $destination.spurt( $handle.open(:bin).slurp(:close) );
+                    }
                 }
             }
+
+            spurt( $dist-dir.child('META6.json').absolute, Rakudo::Internals::JSON.to-json($dist.meta.hash) );
+
+            # reset cached id so it's generated again on next access.
+            # identity changes with every installation of a dist.
+            $!id = Any;
+            self!precompile-distribution-by-id($dist.id) if ?$precompile;
+            return $dist;
         }
-
-        spurt( $dist-dir.child('META6.json').absolute, Rakudo::Internals::JSON.to-json($dist.meta.hash) );
-
-        # reset cached id so it's generated again on next access.
-        # identity changes with every installation of a dist.
-        $!id = Any;
-        self!precompile-distribution-by-id($dist.id) if ?$precompile;
-        return $dist;
     }
 
     ### Precomp stuff beyond this point
