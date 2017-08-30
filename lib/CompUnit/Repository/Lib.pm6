@@ -1,3 +1,4 @@
+use v6;
 use nqp;
 
 my $RMD = $*RAKUDO_MODULE_DEBUG;
