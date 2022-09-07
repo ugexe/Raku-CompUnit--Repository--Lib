@@ -1,33 +1,32 @@
-use v6;
 use Test;
 plan 5;
 
 use CompUnit::Repository::Lib;
-use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent.child('test-libs')}";
+use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent(2).child('resources/test-dists').absolute}";
 
 
-subtest {
+subtest 'name-path only' => {
     ok  $*REPO.repo-chain[0].files("bin/acme-foo-script");
     nok $*REPO.repo-chain[0].files("bin/xxx");
-}, 'name-path only';
+}
 
-subtest {
+subtest 'name-path and distribution name' => {
     ok  $*REPO.repo-chain[0].files("bin/acme-foo-script", name => "Acme-Foo");
     nok $*REPO.repo-chain[0].files("bin/acme-foo-script", name => "xxx");
-}, 'name-path and distribution name';
+}
 
-subtest {
+subtest 'name-path and distribution auth' => {
     ok  $*REPO.repo-chain[0].files("bin/acme-foo-script", auth => "github:ugexe");
     nok $*REPO.repo-chain[0].files("bin/acme-foo-script", auth => "github:xxx");
-}, 'name-path and distribution auth';
+}
 
-subtest {
+subtest 'name-path and distribution ver' => {
     ok  $*REPO.repo-chain[0].files("bin/acme-foo-script", ver => "*");
-}, 'name-path and distribution ver';
+}
 
-subtest {
+subtest 'name-path and distribution name/auth/ver' => {
     ok  $*REPO.repo-chain[0].files("bin/acme-foo-script", name => "Acme-Foo", auth => "github:ugexe", ver => "*");
     nok $*REPO.repo-chain[0].files("bin/xxx", name => "Acme-Foo", auth => "github:ugexe", ver => "*");
-}, 'name-path and distribution name/auth/ver';
+}
 
 done-testing;

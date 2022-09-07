@@ -1,15 +1,30 @@
 {
-    "perl"        : "6",
     "name"        : "CompUnit::Repository::Lib",
-    "version"     : "*",
+    "api"         : "0",
+    "version"     : "0.0.1",
     "owner"       : "ugexe",
     "auth"        : "github:ugexe",
     "authors"     : ["ugexe"],
-    "description" : "CompUnit::Repository::FileSystem but CompUnit::Repository::Installable",
+    "license"     : "Artistic-2.0",
+    "description" : "Like CompUnit::Repository::FileSystem but containing multiple distributions similar to CompUnit::Repository::Installation",
     "provides"    : {
         "CompUnit::Repository::Lib" : "lib/CompUnit/Repository/Lib.pm6"
     },
-    "depends"     : [ ],
-    "support"     : { "bugtracker" : "https://github.com/ugexe/Perl6-CompUnit--Repository--Lib/issues" },
-    "source-url"  : "git://github.com/ugexe/Perl6-CompUnit--Repository--Lib.git"
+    "resources"   : [
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/META6.json",
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/Acme/Foo.pm6",
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/Acme/Foo/Resources.pm6",
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/resources/config.json",
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/bin/acme-foo-script",
+        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/META6.json",
+        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo.pm6",
+        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo/Resources.pm6"
+    ],
+    "depends"      : [ ],
+    "test-depends" : [ "Test" ],
+    "support"      : {
+        "bugtracker" : "https://github.com/ugexe/Perl6-CompUnit--Repository--Lib/issues",
+        "source"     : "https://github.com/ugexe/Perl6-CompUnit--Repository--Lib.git"
+    },
+    "tags" : [ "CompUnit", "Repository", "Lib" ]
 }

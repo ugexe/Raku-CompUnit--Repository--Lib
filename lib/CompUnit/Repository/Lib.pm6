@@ -6,19 +6,19 @@ my $RMD = $*RAKUDO_MODULE_DEBUG;
 my $windows_wrapper = '@rem = \'--*-Perl-*--
 @echo off
 if "%OS%" == "Windows_NT" goto WinNT
-#perl# "%~dpn0" %1 %2 %3 %4 %5 %6 %7 %8 %9
-goto endofperl
+#raku# "%~dpn0" %1 %2 %3 %4 %5 %6 %7 %8 %9
+goto endofraku
 :WinNT
-#perl# "%~dpn0" %*
-if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofperl
+#raku# "%~dpn0" %*
+if NOT "%COMSPEC%" == "%SystemRoot%\system32\cmd.exe" goto endofraku
 if %errorlevel% == 9009 echo You do not have Perl in your PATH.
 if errorlevel 1 goto script_failed_so_exit_with_non_zero_val 2>nul
-goto endofperl
+goto endofraku
 @rem \';
 __END__
-:endofperl
+:endofraku
 ';
-my $perl_wrapper = '#!/usr/bin/env #perl#
+my $raku_wrapper = '#!/usr/bin/env #raku#
 sub MAIN(:$name, :$auth, :$ver, *@, *%) {
     CompUnit::RepositoryRegistry.run-script("#name#", :$name, :$auth, :$ver);
 }';
@@ -39,15 +39,16 @@ class CompUnit::Repository::Lib {
     has %!seen;   # cache distribution lookup for self!matching-dist(...)
     has $!id;
     has $!name;
+    has $!lock;
 
-    has $!cver = nqp::hllize(nqp::atkey(nqp::gethllsym('perl6', '$COMPILER_CONFIG'), 'version'));
+    has $!cver = nqp::hllize(nqp::atkey(nqp::gethllsym('raku', '$COMPILER_CONFIG'), 'version'));
     has $!precomp;
     has $!precomp-stores;
     has $!precomp-store;
 
     my $verbose := nqp::getenvhash<RAKUDO_LOG_PRECOMP>;
 
-    submethod BUILD(:$!prefix, :$!lock, :$!WHICH, :$!next-repo, Str :$!name = 'lol' --> Nil) {
+    submethod TWEAK(:$!name = 'lib', :$!lock = Lock.new) {
         CompUnit::RepositoryRegistry.register-name($!name, self);
     }
 
@@ -70,37 +71,6 @@ class CompUnit::Repository::Lib {
         method id() {
             return nqp::sha1(self.Str);
         }
-
-        # https://github.com/rakudo/rakudo/blob/faea193ec9563f8425a2a59cc4190068adb41c6e/src/core/CompUnit/Repository/FileSystem.pm#L60
-        method checksum {
-            my $parts := nqp::list_s;
-            my $prefix = $.prefix;
-            my $dir  := { .match(/ ^ <.ident> [ <[ ' - ]> <.ident> ]* $ /) }; # ' hl
-            my $file := -> str $file {
-                nqp::eqat($file,'.pm',nqp::sub_i(nqp::chars($file),3))
-                || nqp::eqat($file,'.pm6',nqp::sub_i(nqp::chars($file),4))
-            };
-            nqp::if(
-              $!checksum,
-              $!checksum,
-              ($!checksum = nqp::if(
-                $prefix.e,
-                nqp::stmts(
-                  (my $iter := Rakudo::Internals.DIR-RECURSE(
-                    $prefix.absolute,:$dir,:$file).iterator),
-                  nqp::until(
-                    nqp::eqaddr((my $pulled := $iter.pull-one),IterationEnd),
-                    nqp::if(
-                      nqp::filereadable($pulled),
-                      nqp::push_s($parts,nqp::sha1(slurp($pulled, :enc<iso-8859-1>))),
-                    )
-                  ),
-                  nqp::sha1(nqp::join('',$parts))
-                ),
-                nqp::sha1('')
-              ))
-            )
-        }
     }
 
     method installed(--> Seq) {
@@ -121,12 +91,12 @@ class CompUnit::Repository::Lib {
             my $matches := $_.grep: { .meta<files>{$file}:exists }
 
             my $absolutified-metas := $matches.map: {
-                my $meta      = $_.meta;
-                $meta<source> = $meta<files>{$file}.IO;
+                my $meta = $_.meta;
+                $meta<source> ||= $.prefix.add($_.id).add($meta<files>{$file}).IO.absolute;
                 $meta;
             }
 
-            return $absolutified-metas.grep(*.<source>.e);
+            return $absolutified-metas.grep(*.<source>.IO.e);
         }
     }
     multi method files($file, :$auth, :$ver, :$api) {
@@ -139,12 +109,12 @@ class CompUnit::Repository::Lib {
 
         with self.candidates($spec) {
             my $absolutified-metas := $_.map: {
-                my $meta      = $_.meta;
-                $meta<source> = $meta<files>{$file}.IO;
+                my $meta = $_.meta;
+                $meta<source> ||= $.prefix.add($_.id).add($meta<files>{$file}).IO.absolute;
                 $meta;
             }
 
-            return $absolutified-metas.grep(*.<source>.e);
+            return $absolutified-metas.grep(*.<source>.IO.e);
         }
     }
 
@@ -158,7 +128,7 @@ class CompUnit::Repository::Lib {
         ));
     }
     multi method candidates(CompUnit::DependencySpecification $spec) {
-        return Empty unless $spec.from eq 'Perl6';
+        return Empty unless $spec.from eq 'Perl6' || $spec.from eq 'Raku';
 
         my $version-matcher = ($spec.version-matcher ~~ Bool)
             ?? $spec.version-matcher
@@ -204,7 +174,7 @@ class CompUnit::Repository::Lib {
     method prefix(--> IO::Path:D)  { $!prefix.IO }
     method name(--> Str:D)         { $!name }
     method short-id(--> Str:D)     { 'lib' }
-    method id(--> Str:D)           { $!id //= self.installed.map(*.id).sort.reduce({ nqp::sha1($^a, $^b) }) }
+    method id(--> Str:D)           { $!id //= self.installed.map(*.id).sort.reduce({ nqp::sha1($^a ~ $^b) }) }
     method path-spec(--> Str:D)    { "CompUnit::Repository::Lib#name({$!name // 'lol'})#{self.prefix.absolute}" }
     method can-install(--> Bool:D) { $.prefix.w || ?(!$.prefix.e && try { $.prefix.mkdir } && $.prefix.e) }
 
@@ -215,48 +185,29 @@ class CompUnit::Repository::Lib {
         CompUnit::DependencySpecification  $spec,
         CompUnit::PrecompilationRepository $precomp        = self.precomp-repository(),
         CompUnit::PrecompilationStore     :@precomp-stores = self!precomp-stores(),
-        --> CompUnit:D)
-    {
-        $RMD("[need] -> {$spec.perl}") if $RMD;
+    --> CompUnit:D) {
+
         return %!loaded{~$spec} if %!loaded{~$spec}:exists;
-        $RMD("[need] not cached - keep looking...") if $RMD;
 
         with self!matching-dist($spec) {
             my $id = self!content-address($_, $spec.short-name);
             return %!loaded{$id} if %!loaded{$id}:exists;
 
-            X::CompUnit::UnsatisfiedDependency.new(:specification($spec)).throw
-                unless .meta<source>;
-
-            my $name-path     = parse-value($_.meta<provides>{$spec.short-name});
-            my $source-path   = $_.meta<source>.IO;
-            my $source-handle = CompUnit::Loader.load-source-file($source-path);
-
-            $RMD("[need] name-path:{$name-path}=$source-path source-handle:{$source-handle.perl}") if $RMD;
+            my $bytes  = Blob.new( $_.content($_.meta<provides>{$spec.short-name}).open(:bin).slurp(:bin, :close) );
+            my $handle = CompUnit::Loader.load-source( $bytes );
 
             my $*RESOURCES = Distribution::Resources.new(:repo(self), :dist-id($_.id));
-            my $precomp-handle = $precomp.try-load(
-                CompUnit::PrecompilationDependency::File.new(
-                    id       => CompUnit::PrecompilationId.new($id),
-                    src      => $source-path.absolute,
-                    checksum => ($_.meta<checksum>:exists ?? $_.meta<checksum> !! Str),
-                    spec     => $spec,
-                ),
-                :source($source-path),
-                :@precomp-stores,
-            );
-            my $compunit = CompUnit.new(
-                handle       => ($precomp-handle // $source-handle),
+            my $compunit   = CompUnit.new(
+                handle       => $handle,
                 short-name   => $spec.short-name,
-                version      => $_.meta<ver>,
+                version      => Version.new($_.meta<ver> // 0),
                 auth         => ($_.meta<auth> // Str),
                 repo         => self,
                 repo-id      => $id,
-                precompiled  => $precomp-handle.defined,
+                precompiled  => False,
                 distribution => $_,
             );
 
-            $RMD("[need] taking compunit {$compunit // 'WTF ???'}") if $RMD;
             return %!loaded{~$spec} //= $compunit;
         }
 
@@ -269,7 +220,7 @@ class CompUnit::Repository::Lib {
             return CompUnit.new(
                 :handle(CompUnit::Handle),
                 :short-name($spec.short-name),
-                :version($_.meta<ver>),
+                :version(Version.new($_.meta<ver> // 0)),
                 :auth($_.meta<auth> // Str),
                 :repo(self),
                 :repo-id(self!content-address($_, $spec.short-name)),
@@ -363,10 +314,10 @@ class CompUnit::Repository::Lib {
                         for '', '-j', '-m' -> $be {
                             mkdir $.prefix.child("$withoutext$be").IO.parent;
                             $.prefix.child("$withoutext$be").IO.spurt:
-                                $perl_wrapper.subst('#name#', $name, :g).subst('#perl#', "perl6$be");
+                                $raku_wrapper.subst('#name#', $name, :g).subst('#raku#', "raku$be");
                             if $is-win {
                                 $.prefix.child("$withoutext$be.bat").IO.spurt:
-                                    $windows_wrapper.subst('#perl#', "perl6$be", :g);
+                                    $windows_wrapper.subst('#raku#', "raku$be", :g);
                             }
                             else {
                                 $.prefix.child("$withoutext$be").IO.chmod(0o755);
@@ -401,7 +352,7 @@ class CompUnit::Repository::Lib {
 
         $!lock.protect: {
             for $dist.meta<provides>.hash.kv -> $name, $name-path {
-                state $compiler-id = CompUnit::PrecompilationId.new($*PERL.compiler.id);
+                state $compiler-id = CompUnit::PrecompilationId.new($*RAKU.compiler.id);
                 my $precomp-id     = CompUnit::PrecompilationId.new(self!content-address($dist, $name-path));
                 $precomp-repo.store.delete($compiler-id, $precomp-id);
             }

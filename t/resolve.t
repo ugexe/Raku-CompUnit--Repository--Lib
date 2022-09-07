@@ -2,7 +2,8 @@ use Test;
 plan 2;
 
 use CompUnit::Repository::Lib;
-use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent.child('test-libs')}";
+use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent(2).child('resources/test-dists').absolute}";
+
 
 my $matching-spec = CompUnit::DependencySpecification.new(
     short-name      => 'Acme::Foo',
