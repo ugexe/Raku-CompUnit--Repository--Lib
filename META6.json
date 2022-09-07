@@ -21,7 +21,7 @@
         "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo/Resources.rakumod"
     ],
     "depends"      : [ ],
-    "test-depends" : [ "Test" ],
+    "test-depends" : [ "Test:ver<6.c+>" ],
     "support"      : {
         "bugtracker" : "https://github.com/ugexe/Raku-CompUnit--Repository--Lib/issues",
         "source"     : "https://github.com/ugexe/Raku-CompUnit--Repository--Lib.git"
