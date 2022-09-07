@@ -23,8 +23,8 @@
     "depends"      : [ ],
     "test-depends" : [ "Test" ],
     "support"      : {
-        "bugtracker" : "https://github.com/ugexe/Perl6-CompUnit--Repository--Lib/issues",
-        "source"     : "https://github.com/ugexe/Perl6-CompUnit--Repository--Lib.git"
+        "bugtracker" : "https://github.com/ugexe/Raku-CompUnit--Repository--Lib/issues",
+        "source"     : "https://github.com/ugexe/Raku-CompUnit--Repository--Lib.git"
     },
     "tags" : [ "CompUnit", "Repository", "Lib" ]
 }

@@ -11,4 +11,4 @@ Load modules and install modules to the development style lib/original-path
     require <Acme::Foo>;        # `require` by name
     use Acme::Foo;              # `use` by name
 
-See: L<tests|https://github.com/ugexe/Perl6-CompUnit--Repository--Lib/blob/master/t>
+See: L<tests|https://github.com/ugexe/Raku-CompUnit--Repository--Lib/blob/main/t>
