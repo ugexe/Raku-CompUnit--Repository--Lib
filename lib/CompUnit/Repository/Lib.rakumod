@@ -279,7 +279,7 @@ class CompUnit::Repository::Lib {
         unlink-if-exists( $dist-dir );
     }
 
-    method install(Distribution $distribution, Bool :$force, Bool :$precompile = True) {
+    method install(Distribution $distribution, Bool :$force, Bool :$precompile = False) {
         my $dist = CompUnit::Repository::Distribution.new($distribution);
         fail "$dist already installed" if not $force and $dist.id ~~ self.installed.map(*.id).any;
 
