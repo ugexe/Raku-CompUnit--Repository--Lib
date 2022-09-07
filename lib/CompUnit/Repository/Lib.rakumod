@@ -294,15 +294,15 @@ class CompUnit::Repository::Lib {
                 grep *.defined, $implicit-files.Slip, $explicit-files.Slip;
 
             for @$all-files -> $name-path {
-                state %pm6-path2name = $dist.meta<provides>.antipairs;
-                state @provides      = $dist.meta<provides>.values;
+                state %path2name = $dist.meta<provides>.antipairs;
+                state @provides  = $dist.meta<provides>.values;
 
                 given $name-path {
                     my $handle := $dist.content($name-path);
                     my $destination = $dist-dir.child($name-path) andthen *.parent.mkdir;
 
                     when /^@provides$/ {
-                        my $name = %pm6-path2name{$name-path};
+                        my $name = %path2name{$name-path};
                         note("Installing {$name} for {$dist.meta<name>}") if $verbose and $name ne $dist.meta<name>;
                         $destination.spurt( $handle.open(:bin).slurp(:close) );
                     }

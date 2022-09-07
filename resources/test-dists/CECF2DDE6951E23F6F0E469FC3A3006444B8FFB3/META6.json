@@ -12,8 +12,8 @@
   },
   "ver" : "0",
   "provides" : {
-    "Acme::Foo::Resources" : "lib/Acme/Foo/Resources.pm6",
-    "Acme::Foo" : "lib/Acme/Foo.pm6"
+    "Acme::Foo::Resources" : "lib/Acme/Foo/Resources.rakumod",
+    "Acme::Foo" : "lib/Acme/Foo.rakumod"
   },
   "description" : "Intended for internal testing of CompUnit::Repository::Lib"
 }

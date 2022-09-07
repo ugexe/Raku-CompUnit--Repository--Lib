@@ -8,8 +8,8 @@
   "files" : { },
   "ver" : "0",
   "provides" : {
-    "Acme::Depends::On::Acme::Foo::Resources" : "lib/Acme/Depends/On/Acme/Foo/Resources.pm6",
-    "Acme::Depends::On::Acme::Foo" : "lib/Acme/Depends/On/Acme/Foo.pm6"
+    "Acme::Depends::On::Acme::Foo::Resources" : "lib/Acme/Depends/On/Acme/Foo/Resources.rakumod",
+    "Acme::Depends::On::Acme::Foo" : "lib/Acme/Depends/On/Acme/Foo.rakumod"
   },
   "description" : "Intended for internal testing of CompUnit::Repository::Lib"
 }

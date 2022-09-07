@@ -8,17 +8,17 @@
     "license"     : "Artistic-2.0",
     "description" : "Like CompUnit::Repository::FileSystem but containing multiple distributions similar to CompUnit::Repository::Installation",
     "provides"    : {
-        "CompUnit::Repository::Lib" : "lib/CompUnit/Repository/Lib.pm6"
+        "CompUnit::Repository::Lib" : "lib/CompUnit/Repository/Lib.rakumod"
     },
     "resources"   : [
         "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/META6.json",
-        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/Acme/Foo.pm6",
-        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/Acme/Foo/Resources.pm6",
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/Acme/Foo.rakumod",
+        "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/Acme/Foo/Resources.rakumod",
         "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/resources/config.json",
         "test-dists/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/lib/bin/acme-foo-script",
         "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/META6.json",
-        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo.pm6",
-        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo/Resources.pm6"
+        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo.rakumod",
+        "test-dists/1D0AF1B9D528731ECD09B1AEECA96C0041D7607F/lib/Acme/Depends/On/Acme/Foo/Resources.rakumod"
     ],
     "depends"      : [ ],
     "test-depends" : [ "Test" ],
