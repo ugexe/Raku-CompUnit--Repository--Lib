@@ -1,19 +1,14 @@
 {
   "name" : "Acme-Foo",
-  "perl" : "6.c",
-  "resources" : [
-    "config.json"
-  ],
   "auth" : "github:ugexe",
-  "depends" : [ ],
-  "files" : {
-      "resources/config.json" : "/Users/ugexe/repos/Perl6-CompUnit--Repository--Lib/t/test-libs/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/resources/config.json",
-      "bin/acme-foo-script" : "/Users/ugexe/repos/Perl6-CompUnit--Repository--Lib/t/test-libs/CECF2DDE6951E23F6F0E469FC3A3006444B8FFB3/bin/acme-foo-script"
-  },
   "ver" : "0",
+  "description" : "Intended for internal testing of CompUnit::Repository::Lib",
   "provides" : {
     "Acme::Foo::Resources" : "lib/Acme/Foo/Resources.rakumod",
     "Acme::Foo" : "lib/Acme/Foo.rakumod"
   },
-  "description" : "Intended for internal testing of CompUnit::Repository::Lib"
+  "resources" : [
+    "config.json"
+  ],
+  "depends" : [ ]
 }
