@@ -27,6 +27,7 @@ install:
 build: off
 
 test_script:
+    - SET MVM_SPESH_DISABLE=1
     - prove --ext .rakutest -v -e "raku -I." t/
 
 shallow_clone: true
