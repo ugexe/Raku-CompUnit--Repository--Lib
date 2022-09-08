@@ -1,26 +1,26 @@
-use v6;
-use Test;
+use Test:ver<6.c+>;
 plan 2;
 
 use CompUnit::Repository::Lib;
-use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent.child('test-libs').absolute}";
+use lib "CompUnit::Repository::Lib#{$*PROGRAM.parent(2).child('resources/test-dists').absolute}";
 
-subtest {
+
+subtest 'require module with no external dependencies' => {
     {
         dies-ok { ::("Acme::Foo") };
     }
     {
         use-ok("Acme::Foo"), 'module use-d ok';
     }
-}, 'require module with no external dependencies';
+}
 
-subtest {
+subtest 'require modules with external dependency chain' => {
     {
         dies-ok { ::("Acme::Depends::On::Acme::Foo") };
     }
     {
         use-ok("Acme::Depends::On::Acme::Foo"), 'module use-d ok';
     }
-}, 'require modules with external dependency chain';
+}
 
 done-testing;

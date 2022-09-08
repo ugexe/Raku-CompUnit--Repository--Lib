@@ -1,0 +1,14 @@
+{
+  "name" : "Acme-Foo",
+  "auth" : "github:ugexe",
+  "ver" : "0",
+  "description" : "Intended for internal testing of CompUnit::Repository::Lib",
+  "provides" : {
+    "Acme::Foo::Resources" : "lib/Acme/Foo/Resources.rakumod",
+    "Acme::Foo" : "lib/Acme/Foo.rakumod"
+  },
+  "resources" : [
+    "config.json"
+  ],
+  "depends" : [ ]
+}
