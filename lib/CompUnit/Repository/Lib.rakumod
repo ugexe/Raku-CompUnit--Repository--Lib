@@ -56,8 +56,8 @@ class CompUnit::Repository::Lib {
         has $!checksum;
 
         submethod TWEAK() {
-            self.meta<ver> = Version.new(self.meta<ver> // self.meta<version> // 0);
-            self.meta<files> = self.meta<files>.hash;
+            self.meta<ver> := Version.new(self.meta<ver> // self.meta<version> // 0);
+            self.meta<files> := self.meta<files>.hash;
             # self.meta<api> = Version.new(self.meta<api> // 0); # changes self.Str and self.id
         }
 
